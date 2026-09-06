@@ -1,109 +1,70 @@
-# Docker Compose — Nginx + Backend + MySQL
+# nginx + backend + mysql (Docker Compose)
 
-Мой первый учебный проект по Linux, Docker и Docker Compose.
+Многоконтейнерное приложение из трёх сервисов, поднимаемых одной командой через Docker Compose.
 
 ## Архитектура
 
-Проект состоит из трёх контейнеров:
+```
+Клиент → nginx (порт 80) → backend (порт 5000, внутренняя сеть) → mysql (внутренняя сеть)
+```
 
-- **Nginx** — принимает HTTP-запросы на порту `8080` и проксирует их на backend.
-- **Backend** — Python-приложение, собираемое из собственного Dockerfile.
-- **MySQL 8.0** — база данных с постоянным хранением данных через Docker volume.
+Наружу открыт только порт `nginx`. Порты `backend` и `mysql` наружу не публикуются — доступ к ним возможен только внутри общей docker-сети по имени сервиса (`backend`, `mysql`), что имитирует принцип работы Service/Ingress в Kubernetes.
 
-Все сервисы работают в общей Docker-сети.
+## Сервисы
 
-```text
-Client
-  │
-  │ :8080
-  ▼
-Nginx
-  │
-  │ backend:5000
-  ▼
-Backend
-  │
-  │ MySQL
-  ▼
-MySQL 8.0
-Что использовано
-Debian Linux
-Docker
-Docker Compose
-Nginx
-Python
-MySQL 8.0
-Docker volumes
-Docker networks
-Healthcheck
-depends_on
-Git
-Структура проекта
-.
-├── compose.yaml
-├── default.conf
-├── .gitignore
-└── backend/
-    ├── app.py
-    └── Dockerfile
-Запуск проекта
-Перейти в директорию проекта:
-cd ~/docker/nginx
-Запустить контейнеры:
+| Сервис  | Роль                                                              |
+|---------|--------------------------------------------------------------------|
+| nginx   | Reverse proxy, единственная точка входа снаружи                   |
+| backend | Приложение, обрабатывает бизнес-логику, общается с базой по имени `mysql` |
+| mysql   | База данных, хранит данные в именованном volume `mysql_data`      |
+
+## Устойчивость и надёжность
+
+- **Healthcheck** у `mysql`: проверка `mysql -e "SELECT 1"` каждые 5 секунд — `backend` стартует только когда база реально готова принимать соединения (`depends_on: condition: service_healthy`).
+- **Restart policy**: у всех сервисов `restart: unless-stopped`. Важный нюанс, проверенный на практике: политика реагирует не на "kill vs stop", а на то, **кто остановил контейнер**.
+  - Остановка через Docker API — `docker stop` **и** `docker kill` одинаково — считается осознанным действием пользователя, и Docker не перезапускает контейнер, пока его не запустят заново вручную.
+  - Restart policy реально срабатывает только на **непредвиденный крах процесса изнутри контейнера** (например, `docker exec <container> sh -c "kill -9 1"`, segfault, OOM) — такой сценарий Docker не отличает от ручной остановки и честно перезапускает контейнер сам.
+- **Персистентность данных**: данные MySQL хранятся в именованном volume `mysql_data` и переживают `docker compose down` (но не `docker compose down -v`, который удаляет и volumes).
+
+## Секреты
+
+Все чувствительные данные (пароли, имя базы, пользователь) вынесены в файл `.env`, который **не коммитится** в репозиторий (в `.gitignore`). Пример структуры — в `.env.example`.
+
+## Как запустить
+
+1. Скопировать пример конфига:
+   ```bash
+   cp .env.example .env
+   ```
+2. Заполнить `.env` своими значениями.
+3. Поднять проект:
+   ```bash
+   docker compose up -d
+   ```
+4. Открыть в браузере: `http://localhost:8080`.
+
+> Используется `docker compose` (через пробел, плагин Compose V2), а не устаревший standalone `docker-compose` (через дефис).
+
+## Проверка живучести
+
+```bash
+# Настоящий непредвиденный краш — контейнер должен подняться сам
+docker exec web-app-nginx-1 sh -c "kill -9 1"
+sleep 3
+docker ps -a | grep nginx   # STATUS должен снова стать Up
+
+# Остановка через Docker API — контейнер НЕ поднимется сам, это ожидаемо для unless-stopped
+docker kill web-app-nginx-1
+# или: docker compose stop nginx
+docker ps -a | grep nginx   # статус Exited, пока не поднимешь вручную
+```
+
+## Проверка персистентности данных
+
+```bash
+docker compose down     # данные должны сохраниться
 docker compose up -d
-Проверить состояние:
-docker compose ps
-MySQL должен иметь статус:
-healthy
+# проверить, что данные в базе на месте
 
-
-Проверка конфигурации
-
-Перед запуском можно проверить итоговую конфигурацию Compose:
-docker compose config
-Полное пересоздание
-
-Остановить и удалить контейнеры:
-docker compose down
-
-Запустить проект заново:
-docker compose up -d
-Данные MySQL сохраняются в Docker volume и не удаляются обычной командой docker compose down.
-
-Диагностика
-Логи отдельного сервиса:
-docker compose logs nginx
-docker compose logs backend
-docker compose logs mysql
-
-Список контейнеров:
-docker ps
-
-Информация о контейнере:
-docker inspect <container>
-
-Просмотр процессов контейнера:
-docker top <container>
-
-Healthcheck
-Для MySQL настроена проверка готовности:
-mysql → SELECT 1 → healthy
-Backend зависит от готовности MySQL.
-Это позволяет не запускать backend до того, как база данных будет готова принимать подключения.
-Постоянное хранение данных
-MySQL использует Docker volume:
-mysql_data
-Поэтому удаление контейнера MySQL не приводит к автоматическому удалению данных базы.
-
-Цель проекта
-
-Проект создан как практическая работа для изучения:
-Linux
-Docker
-Docker Compose
-сетевого взаимодействия контейнеров
-reverse proxy
-диагностики контейнеров
-healthcheck
-persistent storage
-Git
+docker compose down -v  # данные должны исчезнуть (volume удалён явно)
+```
