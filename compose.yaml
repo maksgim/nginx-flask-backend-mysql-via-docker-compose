@@ -16,15 +16,15 @@ services:
       context: ./backend
     restart: unless-stopped
     environment:
-     - DB_HOST=mysql
-     - DB_USER=${MYSQL_USER}
-     - DB_PASSWORD=${MYSQL_PASSWORD}
-     - DB_NAME=${MYSQL_DATABASE}
+      - DB_HOST=mysql
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
     depends_on:
-     mysql:
-       condition: service_healthy
+      mysql:
+        condition: service_healthy
     networks:
-     - app_network
+      - app_network
 
   mysql:
     image: mysql:8.0
@@ -41,6 +41,7 @@ services:
       retries: 5
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - app_network
 
@@ -49,3 +50,5 @@ volumes:
 
 networks:
   app_network:
+#mysql:
+ #      condition: service_healthy
